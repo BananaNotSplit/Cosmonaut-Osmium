@@ -17,16 +17,16 @@ export default abstract class EntangledModule<Data> extends Module {
 		return path.join(this.dataFolder, this.dataFileName)
 	}
 
-	EnsureDataFolder() {
+	ensureDataFolder() {
 		if (!fs.existsSync(this.dataFolder)) {
 			fs.mkdirSync(this.dataFolder, { recursive: true })
 		}
 	}
 
-	abstract NewData(): Data
+	abstract newData(): Data
 
-	Load(): ["ok"|"new", Data]|["failed", any] {
-		this.EnsureDataFolder()
+	load(): ["ok"|"new", Data]|["failed", any] {
+		this.ensureDataFolder()
 		if (fs.existsSync(this.dataFilePath)) {
 			try {
 				const json = fs.readFileSync(this.dataFilePath, "utf-8")
@@ -37,12 +37,12 @@ export default abstract class EntangledModule<Data> extends Module {
 				return ["failed", j]
 			}
 		} else {
-			return ["new", this.NewData()]
+			return ["new", this.newData()]
 		}
 	}
 
-	Save() {
-		this.EnsureDataFolder()
+	save() {
+		this.ensureDataFolder()
 		const json = JSON.stringify(this.data, null, 3)
 		try {
 			fs.writeFileSync(
@@ -62,25 +62,25 @@ export default abstract class EntangledModule<Data> extends Module {
 
 	constructor(guild: Guild, client: Client<true>) {
 		super(guild, client)
-		const loadInfo = this.Load()
+		const loadInfo = this.load()
 		switch (loadInfo[0]) {
 			case "ok":
 				this.data = loadInfo[1]
 				break
 			case "new":
 				this.data = loadInfo[1]
-				this.Save()
+				this.save()
 				break
 			case "failed":
 				throw loadInfo[1]
 		}
 		this.interval = setInterval(() => {
-			
+			this.save()
 		}, 15 * 60 * 1000);
 	}
 
 	cleanup(): void {
 		clearInterval(this.interval)
-		this.Save()
+		this.save()
 	}
 }

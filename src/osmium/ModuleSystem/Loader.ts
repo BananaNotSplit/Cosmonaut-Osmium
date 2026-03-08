@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, Guild, Snowflake } from "discord.js";
+import { Client, Events, GatewayIntentBits, Guild, REST, Routes, Snowflake } from "discord.js";
 import Module from "./Module";
 import ModuleImplementation from "./Implementation";
 

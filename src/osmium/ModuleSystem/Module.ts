@@ -1,9 +1,20 @@
-import { Client, Events, Guild, Message } from "discord.js"
+import { ChatInputCommandInteraction, Client, ContextMenuCommandBuilder, Events, Guild, Interaction, Message, SlashCommandBuilder, User, UserContextMenuCommandInteraction } from "discord.js"
+
+type CommandConfig<T extends "slash" | "userContextMenu"> = {
+    slash: {
+        info: SlashCommandBuilder,
+        method: (interaction: ChatInputCommandInteraction) => void
+    },
+    userContextMenu: {
+        info: ContextMenuCommandBuilder,
+        method: (interaction: UserContextMenuCommandInteraction, target: User, source: User) => void
+    }
+}[T]
 
 export default abstract class Module {
 	guild: Guild
 
-	MessageCreate(message: Message, bot: boolean, fromSelf: boolean) { }
+	messageCreate(message: Message, bot: boolean, fromSelf: boolean) { }
 
 	constructor(guild: Guild, client: Client<true>) {
 		this.guild = guild
@@ -11,9 +22,33 @@ export default abstract class Module {
 
 		client.addListener(Events.MessageCreate, message => {
 			if (message.guildId !== guild.id) return
-			this.MessageCreate(message, message.author.bot, message.author === this.guild.client.user)
+			this.messageCreate(message, message.author.bot, message.author === this.guild.client.user)
+		})
+
+		this.setupCommands()
+	}
+	protected linkCommand<T extends
+	"slash" |
+	"userContextMenu"
+	> (
+		type: T,
+		info: CommandConfig<T>["info"],
+		method: CommandConfig<T>["method"]
+	): void {
+		this.guild.client.application.commands.create(info, this.guild.id)
+		.then(command => {
+			this.guild.client.on(Events.InteractionCreate, interaction => {
+				//@ts-ignore fuck it we ball
+				if (interaction.commandName !== command.name) return //skip other commands
+				if (interaction.isUserContextMenuCommand() && type === "userContextMenu") {
+					//@ts-ignore they are already doing something wrong if this errors
+					method.call(this, interaction, interaction.targetUser, interaction.user) // keep this context
+				}
+			})
 		})
 	}
+
+	setupCommands(): void { }
 
 	cleanup(): void { }
 }

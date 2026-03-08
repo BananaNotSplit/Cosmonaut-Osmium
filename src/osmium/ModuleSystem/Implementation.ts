@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Guild } from "discord.js"
+import { Client, GatewayIntentBits, Guild, SlashCommandBuilder } from "discord.js"
 import Module from "./Module"
 
 export default interface ModuleImplementation {
