@@ -29,10 +29,12 @@ export default class Leveling extends EntangledModule<LevelingData> {
 
 	grantXP(source: User, amount: number): boolean {
 		console.log(`Granting ${source.displayName} ${amount} XP`)
+		console.log(this.data.levels)
 		var record = this.data.levels[source.id]
-		if (!record) {
+		if (record === undefined) {
 			record = { level: 0, xp: 0 }
-			this.data.levels[source.id]
+			console.log(`Implanted record for ${source.displayName}`)
+			this.data.levels[source.id] = record
 		}
 		record.xp += amount
 		if (record.xp >= XpForEachLevel(record.level, this.data.levelingScalar)) {
