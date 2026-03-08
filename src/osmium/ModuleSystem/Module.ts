@@ -49,6 +49,10 @@ export default abstract class Module {
 					//@ts-ignore they are already doing something wrong if this errors
 					method.call(this, interaction, interaction.targetUser, interaction.user) // keep this context
 				}
+				if (interaction.isChatInputCommand() && type === "slash") {
+					//@ts-ignore see above
+					method.call(this, interaction)
+				}
 			})
 		})
 	}
