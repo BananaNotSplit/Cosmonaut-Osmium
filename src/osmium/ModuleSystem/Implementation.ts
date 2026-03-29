@@ -5,5 +5,5 @@ export default interface ModuleImplementation {
 	new (guild: Guild, client: Client<true>): Module
 	readonly friendlyName: string
 	readonly description?: string
-	intents?: GatewayIntentBits[]
+	readonly intents?: GatewayIntentBits[]
 }
