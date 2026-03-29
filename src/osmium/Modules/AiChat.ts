@@ -1,4 +1,4 @@
-import { ChannelType, ChatInputCommandInteraction, Client, GatewayIntentBits, Guild, Message, SlashCommandBuilder, Snowflake, TextChannel } from "discord.js"
+import { ChannelType, ChatInputCommandInteraction, Client, GatewayIntentBits, Guild, Message, SendableChannels, SlashCommandBuilder, Snowflake, TextChannel } from "discord.js"
 import EntangledModule from "../ModuleSystem/EntangledModule"
 import OpenAI from "openai"
 
@@ -8,8 +8,9 @@ type MessageRole = "user"|"assistant"|"system"
 
 interface StoredMessage {
 	role: MessageRole
-	// snowflake: Snowflake
+	snowflake?: Snowflake
 	content: string
+	influence?: string | undefined
 }
 
 interface StoredChat {
@@ -56,6 +57,18 @@ export default class AiChat extends EntangledModule<Config> {
 	//#region Chatting [ main ]
 
 	client: OpenAI
+	channels: { [id: Snowflake]: SendableChannels } = {}
+
+	async getChannel(id: Snowflake): Promise<SendableChannels|undefined> {
+		const cached = this.channels[id]
+		if (cached) return cached
+		const newChannel = await this.guild.client.channels.fetch(id)
+		if (!newChannel) return
+		if (!newChannel.isSendable()) return
+
+		this.channels[id] = newChannel
+		return newChannel
+	}
 
 	createSystemMessage(chat: StoredChat) {
 		return `
@@ -69,12 +82,20 @@ ${chat.aiCharacterPrompt}
 `
 	}
 
-	async replyToChat(chat: StoredChat): Promise<StoredMessage|undefined> {
+	async replyToChat(chat: StoredChat, asUser: boolean = false, influence?: string): Promise<StoredMessage|undefined> {
 		console.group(`AI Reply: ${chat.channel}`)
-		const messages: StoredMessage[] = [{
+		let messages: StoredMessage[] = [{
 			role: "system",
 			content: this.createSystemMessage(chat)
 		}, ...chat.messages]
+
+		if (asUser) {
+			messages.push({role: "system", content: "Act as the user."})
+		}
+
+		if (influence) {
+			messages.push({role: "system", content: influence})
+		}
 
 		let response;
 		try {
@@ -111,8 +132,9 @@ ${chat.aiCharacterPrompt}
 		}
 
 		const aiMessage: StoredMessage = {
-			role: "assistant",
-			content: messageContent
+			role: asUser ? "user" : "assistant",
+			content: messageContent,
+			influence: influence
 		}
 
 		chat.messages.push(aiMessage)
@@ -121,7 +143,36 @@ ${chat.aiCharacterPrompt}
 		return aiMessage
 	}
 
-	messageCreate(message: Message, bot: boolean, fromSelf: boolean, mentioningSelf: boolean): void {
+	async regenerate(chat: StoredChat, influence?: string) {
+		const message = chat.messages.pop()
+		if (!message) return
+
+		if (message.snowflake) {
+			const channel = await this.guild.client.channels.fetch(chat.channel);
+
+			if (!channel || !channel.isTextBased()) return;
+
+			const discordMessage = await channel.messages.fetch(message.snowflake);
+
+			discordMessage.delete()
+		}
+
+		let newMessage = await this.replyToChat(chat, message.role === "user", influence ?? message.influence)
+		if (!newMessage) {
+			console.error(`Failed to send channel to reply in ${chat.channel}!`)
+			return
+		}
+		const channel = await this.getChannel(chat.channel)
+		if (!channel) {
+			console.error(`Failed to get channel to reply in ${chat.channel}!`)
+			return
+		}
+		
+		const discordMessage = await channel.send(newMessage.content)
+		newMessage.snowflake = discordMessage.id
+	}
+
+	async messageCreate(message: Message, bot: boolean, fromSelf: boolean, mentioningSelf: boolean) {
 		if (bot) return
 		let chat = this.data.chats[message.channelId]
 		if (!chat) return
@@ -131,19 +182,13 @@ ${chat.aiCharacterPrompt}
 		})
 		if (!message.channel.isSendable()) return
 		message.channel.sendTyping()
-		this.replyToChat(chat).then((reply) => {
-			if (!reply) {
-				console.warn("All that for no message?")
-				return
-			}
-			message.reply(reply.content)
-		})
-		// message.reply(this.createSystemMessage({
-		// 	channel: "a",
-		// 	messages: [],
-		// 	userCharacterPrompt: "User character info\n\n# something important\n very important yes",
-		// 	aiCharacterPrompt: "uhh woman stand, woman go, man stand, man go",
-		// }))
+		let aiMessage = await this.replyToChat(chat)
+		if (!aiMessage) {
+			console.warn("All that for no message?")
+			return
+		}
+		const reply = await message.reply(aiMessage.content)
+		aiMessage.snowflake = reply.id
 	}
 
 	//#endregion
@@ -175,12 +220,14 @@ ${chat.aiCharacterPrompt}
 		const subcommand = interaction.options.getSubcommand()
 		const subcommandGroup = interaction.options.getSubcommandGroup()
 
-		if (subcommand === "establish") {
-			await this.establishNewChat(interaction, interaction.options.getString("name", true))
-		} else if (subcommandGroup === "sysprompt") {
+		if (subcommandGroup === "sysprompt") {
 			await this.manageSystemPrompt(interaction, subcommand)
 		} else if (subcommandGroup === "character") {
 			await this.manageCharacterDescriptions(interaction, subcommand)
+		} else if (subcommand === "establish") {
+			await this.establishNewChat(interaction, interaction.options.getString("name", true))
+		} else if (subcommand === "regenerate") {
+			await this.regenerateMessage(interaction, interaction.options.getString("influence"))
 		}
 	}
 
@@ -233,6 +280,16 @@ ${chat.aiCharacterPrompt}
 				flags: [ "Ephemeral" ]
 			})
 		}
+	}
+
+	async regenerateMessage(interaction: ChatInputCommandInteraction, influence: string|null) {
+		const chat = this.getChatForInteraction(interaction)
+		if (!chat) return
+		interaction.reply({
+			content: "Regenerating...",
+			flags: [ "Ephemeral" ]
+		})
+		await this.regenerate(chat, influence ?? undefined)
 	}
 
 	async establishNewChat(interaction: ChatInputCommandInteraction, name: string) {
@@ -296,6 +353,14 @@ ${chat.aiCharacterPrompt}
 					.setName("name")
 					.setDescription("The name of the chat.")
 					.setRequired(true)
+				)
+			)
+			.addSubcommand((subcommand) => subcommand
+				.setName("regenerate")
+				.setDescription("Regenerates the previous message.")
+				.addStringOption((option) => option
+					.setName("instructions")
+					.setDescription("Optional instructions to influence the AI.")
 				)
 			)
 			.addSubcommandGroup((group) => group
